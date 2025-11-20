@@ -1,0 +1,46 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(customer, "Покупатель", "Просматривает историю заказов")
+
+System_Boundary(marketplace, "NovaMarket v2 - История заказов") {
+    Container(api_gateway, "API Gateway", "NGINX", "Маршрутизация запросов")
+    Container(order_history_service, "Order History Service", ".NET", "Полная история заказов, Event Sourcing")
+    Container(reporting_service, "Reporting Service", ".NET", "Генерация чеков")
+    Container(review_service, "Review Service", ".NET", "Управление отзывами")
+    
+    ContainerDb(event_store, "Event Store", "EventStoreDB", "Все события заказов (аудит)")
+    ContainerDb(order_history_db, "Order History DB", "MongoDB", "Денормализованная история для UI")
+    
+    Container(queue, "Message Broker", "RabbitMQ", "Асинхронная коммуникация")
+}
+
+' Показываем связь с основной системой (из Task1)
+System_Boundary(main_system, "Основная система") {
+    Container(order_service, "Order Service", ".NET", "Оформление заказов")
+    Container(catalog_service, "Catalog Service", ".NET", "Товары")
+    Container(payment_service, "Payment Service", ".NET", "Платежи")
+    Container(delivery_service, "Delivery Service", ".NET", "Доставка")
+}
+
+Rel(customer, api_gateway, "HTTPS")
+Rel(api_gateway, order_history_service, "REST/gRPC", "Запросы истории")
+
+' Order History Service подписан на ВСЕ события из основной системы
+Rel(order_service, queue, "OrderCreated", "AMQP")
+Rel(catalog_service, queue, "ReservationPlaced/Failed", "AMQP")
+Rel(payment_service, queue, "PaymentCompleted/Failed", "AMQP")
+Rel(delivery_service, queue, "DeliveryScheduled/Updated", "AMQP")
+
+Rel(queue, order_history_service, "Все события заказов", "AMQP")
+
+' Event Sourcing и read-модели
+Rel(order_history_service, event_store, "Сохраняет события", "gRPC")
+Rel(order_history_service, order_history_db, "Строит read-модели", "MongoDB")
+
+' Дополнительные сервисы используют историю
+Rel(reporting_service, order_history_db, "Чтение для чеков", "MongoDB")
+Rel(review_service, order_history_db, "Чтение для отзывов", "MongoDB")
+Rel(review_service, event_store, "Аудит изменений", "gRPC")
+
+@enduml

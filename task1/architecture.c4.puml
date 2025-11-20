@@ -1,0 +1,60 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(customer, "Покупатель", "Просматривает товары, оформляет заказы")
+Person(seller, "Продавец", "Получает уведомления о заказах")
+
+System_Boundary(marketplace, "NovaMarket") {
+    Container(api_gateway, "API Gateway", "NGINX", "Маршрутизация запросов, rate limiting")
+    
+    Container(catalog_service, "Catalog Service", ".NET", "Управление товарами, наличие, цены")
+    Container(order_service, "Order Service", ".NET", "Оформление заказов, статусы")
+    Container(payment_service, "Payment Service", ".NET", "Обработка платежей")
+    Container(user_service, "User Service", ".NET", "Управление пользователями")
+    Container(notification_service, "Notification Service", ".NET", "Отправка уведомлений")
+    Container(delivery_service, "Delivery Service", ".NET", "Интеграция с логистикой")
+    
+    ContainerDb(catalog_db, "Catalog DB", "PostgreSQL", "Товары, категории, наличие")
+    ContainerDb(order_db, "Order DB", "PostgreSQL", "Текущее состояние заказов")
+    ContainerDb(user_db, "User DB", "PostgreSQL", "Пользователи, профили")
+    
+    Container(queue, "Message Broker", "RabbitMQ", "Асинхронная коммуникация")
+}
+
+System_Ext(payment_gateway, "Платежный шлюз", "Внешний платежный провайдер")
+System_Ext(logistics_provider, "Логистика", "Внешняя служба доставки")
+
+Rel(customer, api_gateway, "HTTPS")
+Rel(seller, api_gateway, "HTTPS")
+
+Rel(api_gateway, catalog_service, "REST/gRPC")
+Rel(api_gateway, order_service, "REST/gRPC") 
+Rel(api_gateway, user_service, "REST/gRPC")
+
+Rel(catalog_service, catalog_db, "SQL")
+Rel(order_service, order_db, "SQL")
+Rel(user_service, user_db, "SQL")
+
+' События между микросервисами (Saga хореография)
+Rel(order_service, queue, "OrderCreated", "AMQP")
+Rel(queue, catalog_service, "OrderCreated", "AMQP")
+Rel(queue, payment_service, "OrderCreated", "AMQP")
+
+Rel(payment_service, queue, "PaymentCompleted", "AMQP")
+Rel(payment_service, queue, "PaymentFailed", "AMQP") 
+Rel(queue, order_service, "PaymentCompleted/Failed", "AMQP")
+Rel(queue, notification_service, "PaymentCompleted/Failed", "AMQP")
+
+Rel(order_service, queue, "OrderReadyForDelivery", "AMQP")
+Rel(queue, delivery_service, "OrderReadyForDelivery", "AMQP")
+
+Rel(delivery_service, queue, "DeliveryScheduled", "AMQP")
+Rel(delivery_service, queue, "DeliveryFailed", "AMQP")
+Rel(queue, order_service, "DeliveryScheduled/Failed", "AMQP")
+Rel(queue, notification_service, "DeliveryScheduled/Failed", "AMQP")
+
+' Внешние интеграции
+Rel(payment_service, payment_gateway, "API вызов", "REST")
+Rel(delivery_service, logistics_provider, "API вызов", "REST")
+
+@enduml

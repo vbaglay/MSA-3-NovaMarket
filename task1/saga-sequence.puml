@@ -1,0 +1,111 @@
+@startuml
+actor Покупатель
+participant "API Gateway" as Gateway
+participant "Order Service" as Order
+participant "Catalog Service" as Catalog
+participant "Payment Service" as Payment
+participant "Delivery Service" as Delivery
+participant "Notification Service" as Notification
+participant "Order History Service" as History
+participant "Платежный шлюз" as PaymentGW
+participant "Логистика" as Logistics
+
+Покупатель -> Gateway: Оформление заказа()
+Gateway -> Order: CreateOrder()
+Order -> Order: Создание заказа
+Order --> Gateway: Order created
+Gateway --> Покупатель: Order created
+
+' Order History Service получает ВСЕ события
+Order -> History: OrderCreated
+
+Order -> Catalog: OrderCreated
+Catalog -> Catalog: Проверка наличия()
+alt Товар доступен
+    Catalog -> Catalog: Резервирование товара()
+    Catalog -> Order: ReservationPlaced
+    Catalog -> History: ReservationPlaced
+else Товар недоступен
+    Catalog -> Order: ReservationFailed
+    Catalog -> History: ReservationFailed
+    Order -> Order: Отмена заказа
+    Order -> Notification: OrderCancelled
+    Order -> History: OrderCancelled
+    Notification -> Покупатель: Уведомление об отмене
+    return Заказ отменен
+end
+
+Order -> Payment: OrderCreated
+Payment -> PaymentGW: ProcessPayment()
+alt Оплата успешна
+    PaymentGW --> Payment: Payment OK
+    Payment -> Order: PaymentCompleted
+    Payment -> Notification: PaymentCompleted
+    Payment -> History: PaymentCompleted
+    Notification -> Покупатель: Уведомление об оплате
+    
+    Order -> Delivery: OrderReadyForDelivery
+    Order -> History: OrderReadyForDelivery
+    Delivery -> Logistics: ScheduleDelivery()
+    alt Доставка доступна
+        Logistics --> Delivery: Delivery scheduled
+        Delivery -> Order: DeliveryScheduled
+        Delivery -> Notification: DeliveryScheduled
+        Delivery -> History: DeliveryScheduled
+        Notification -> Покупатель: Уведомление о доставке
+        Order -> Order: Order completed
+        Order -> History: OrderDelivered
+    else Доставка недоступна
+        Logistics --> Delivery: Service unavailable
+        Delivery -> Order: DeliveryFailed
+        Delivery -> History: DeliveryFailed
+        Order -> Payment: RefundInitiated
+        Order -> History: RefundInitiated
+        Payment -> PaymentGW: InitiateRefund()
+        PaymentGW --> Payment: Refund processed
+        Payment -> Order: RefundCompleted
+        Payment -> History: RefundCompleted
+        Order -> Catalog: ReservationCancelled
+        Order -> History: ReservationCancelled
+        Catalog -> Catalog: Освобождение резерва
+        Order -> Notification: OrderCancelled
+        Order -> History: OrderCancelled
+        Notification -> Покупатель: Уведомление об отмене
+    end
+else Ошибка оплаты
+    PaymentGW --> Payment: Payment failed
+    Payment -> Order: PaymentFailed
+    Payment -> History: PaymentFailed
+    Order -> Catalog: ReservationCancelled
+    Order -> History: ReservationCancelled
+    Catalog -> Catalog: Освобождение резерва
+    Order -> Notification: OrderCancelled
+    Order -> History: OrderCancelled
+    Notification -> Покупатель: Уведомление об отмене
+end
+
+group Таймауты
+    Order -> Order: Таймер резервирования (15 мин)
+    alt Таймаут резервирования
+        Order -> Catalog: ReservationTimeout
+        Order -> History: ReservationTimeout
+        Catalog -> Catalog: Освобождение резерва
+        Order -> Order: Order expired
+        Order -> Notification: OrderCancelled
+        Order -> History: OrderCancelled
+        Notification -> Покупатель: Уведомление об отмене
+    end
+    
+    Order -> Order: Таймер оплаты (30 мин)
+    alt Таймаут оплаты
+        Order -> Catalog: PaymentTimeout
+        Order -> History: PaymentTimeout
+        Catalog -> Catalog: Освобождение резерва
+        Order -> Order: Order expired
+        Order -> Notification: OrderCancelled
+        Order -> History: OrderCancelled
+        Notification -> Покупатель: Уведомление об отмене
+    end
+end
+
+@enduml
